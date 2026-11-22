@@ -42,6 +42,10 @@ jobs:
       - uses: actions/checkout@v5
 
       - uses: pypa/cibuildwheel@v4.3.5
+        env:
+          # PRs: only CPython 3.14 for fast feedback. main, releases and
+          # manual runs: every supported version (skip list in pyproject.toml).
+          CIBW_BUILD: ${{ github.event_name == 'pull_request' && 'cp314-*' || '*' }}
 
       - uses: actions/upload-artifact@v4
         with:
@@ -66,3 +70,22 @@ jobs:
           merge-multiple: true
 
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  upload_release_assets:
+    name: Upload to GitHub release
+    needs: [build_sdist, build_wheels]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    permissions:
+      contents: write  # upload release assets
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Upload wheels and sdist to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ github.event.release.tag_name }}" dist/* --repo "${{ github.repository }}" --clobber
