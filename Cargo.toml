@@ -1,0 +1,37 @@
+[package]
+name = "vegam"
+# Kept in step with [project].version in pyproject.toml by scripts/release.py.
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.85"
+description = "Jerk-limited time-optimal path parameterization (TOPP)"
+license = "Apache-2.0"
+repository = "https://github.com/hashb/vegam"
+readme = "README.md"
+keywords = ["robotics", "trajectory", "motion-planning", "topp", "jerk"]
+categories = ["science::robotics", "api-bindings"]
+build = "rust/build.rs"
+# The crate lives at the repository root so the published package can bundle
+# the C++ sources; only these files go into it.
+include = [
+    "/Cargo.toml",
+    "/LICENSE",
+    "/README.md",
+    "/include/**",
+    "/src/vegam.cpp",
+    "/rust/**",
+]
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+path = "rust/src/lib.rs"
+
+[[test]]
+name = "api"
+path = "rust/tests/api.rs"
+
+[build-dependencies]
+cc = "1.2"

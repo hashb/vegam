@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Bump the version, tag it and create a GitHub release.
 
-Publishing the release triggers .github/workflows/wheels.yml, which builds the
-sdist and wheels and uploads them to PyPI.
+The version is written to pyproject.toml and Cargo.toml (as semver: 0.2.0rc1
+becomes 0.2.0-rc.1). Publishing the release triggers
+.github/workflows/wheels.yml, which uploads the sdist and wheels to PyPI, and
+.github/workflows/rust.yml, which publishes the crate to crates.io.
 
 Usage:
     python scripts/release.py patch            # 0.1.2 -> 0.1.3
@@ -25,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 PYPROJECT = ROOT / "pyproject.toml"
+CARGO_TOML = ROOT / "Cargo.toml"
 
 # X.Y.Z with an optional pre-release suffix (a1, b2, rc1).
 VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)((?:a|b|rc)\d+)?$")
@@ -32,6 +35,12 @@ VERSION_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)((?:a|b|rc)\d+)?$")
 PROJECT_VERSION_RE = re.compile(
     r'(^\[project\]\s*$.*?^version\s*=\s*")([^"]+)(")', re.MULTILINE | re.DOTALL
 )
+# The `version = "..."` line inside the [package] table of Cargo.toml.
+PACKAGE_VERSION_RE = re.compile(
+    r'(^\[package\]\s*$.*?^version\s*=\s*")([^"]+)(")', re.MULTILINE | re.DOTALL
+)
+# Python pre-release kinds and their semver spelling: 1.2.0rc1 -> 1.2.0-rc.1.
+CARGO_PRERELEASE = {"a": "alpha", "b": "beta", "rc": "rc"}
 
 
 def run(*cmd: str, capture: bool = False) -> str:
@@ -52,9 +61,20 @@ def read_version() -> str:
     return match.group(2)
 
 
-def write_version(new: str) -> None:
-    text = PYPROJECT.read_text()
-    PYPROJECT.write_text(PROJECT_VERSION_RE.sub(rf"\g<1>{new}\g<3>", text, count=1))
+def write_version(path: Path, pattern: re.Pattern[str], new: str) -> None:
+    text = path.read_text()
+    if not pattern.search(text):
+        fail(f"could not find the version line in {path.name}")
+    path.write_text(pattern.sub(rf"\g<1>{new}\g<3>", text, count=1))
+
+
+def cargo_version(version: str) -> str:
+    """Convert a Python version to semver for Cargo: 1.2.0rc1 -> 1.2.0-rc.1."""
+    major, minor, patch, prerelease = VERSION_RE.match(version).groups()
+    if not prerelease:
+        return f"{major}.{minor}.{patch}"
+    kind, number = re.fullmatch(r"([a-z]+)(\d+)", prerelease).groups()
+    return f"{major}.{minor}.{patch}-{CARGO_PRERELEASE[kind]}.{number}"
 
 
 def next_version(current: str, part: str) -> str:
@@ -110,7 +130,7 @@ def main() -> None:
     if run("git", "tag", "--list", tag, capture=True):
         fail(f"tag {tag} already exists")
 
-    print(f"version: {current} -> {new}")
+    print(f"version: {current} -> {new} (crate: {cargo_version(new)})")
     print(f"tag:     {tag} on {args.branch}")
     print(f"release: {'draft' if args.draft else 'published'}{' pre-release' if prerelease else ''}")
 
@@ -120,11 +140,16 @@ def main() -> None:
     if not args.yes and input("proceed? [y/N] ").strip().lower() != "y":
         sys.exit("aborted")
 
-    write_version(new)
-    files = ["pyproject.toml"]
+    write_version(PYPROJECT, PROJECT_VERSION_RE, new)
+    write_version(CARGO_TOML, PACKAGE_VERSION_RE, cargo_version(new))
+    files = ["pyproject.toml", "Cargo.toml"]
     if (ROOT / "uv.lock").exists() and shutil.which("uv"):
         run("uv", "lock", "--quiet")
         files.append("uv.lock")
+    if (ROOT / "Cargo.lock").exists() and shutil.which("cargo"):
+        # Refreshes only this crate's own entry, not its dependencies.
+        run("cargo", "update", "--workspace", "--quiet")
+        files.append("Cargo.lock")
 
     run("git", "add", *files)
     run("git", "commit", "--quiet", "-m", f"Release {tag}")
@@ -138,8 +163,9 @@ def main() -> None:
         gh.append("--prerelease")
     run(*gh)
 
-    print(f"released {tag}; the build and publish workflow is now running:")
+    print(f"released {tag}; the build and publish workflows are now running:")
     print("  gh run list --workflow wheels.yml --limit 1")
+    print("  gh run list --workflow rust.yml --limit 1")
 
 
 if __name__ == "__main__":
