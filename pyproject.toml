@@ -27,6 +27,8 @@ test = ["pytest>=8"]
 minimum-version = "build-system.requires"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["python/vegam"]
+# The Rust crate is published separately to crates.io.
+sdist.exclude = ["Cargo.toml", "Cargo.lock", "rust/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,104 @@
+name: Rust crate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} (${{ matrix.toolchain }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest      # linux x86_64, gcc
+          - ubuntu-24.04-arm   # linux aarch64, gcc
+          - windows-latest     # windows amd64, msvc
+          - macos-latest       # macos arm64, clang
+        toolchain: [stable]
+        include:
+          - os: ubuntu-latest
+            toolchain: "1.85"  # rust-version in Cargo.toml
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --all-targets
+
+      - run: cargo test --doc
+
+  lint:
+    name: Lint and package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo fmt --check
+
+      - run: cargo clippy --all-targets -- -D warnings
+
+      - name: Check docs
+        run: cargo doc --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+      # Builds the crate from the packaged tarball, catching files missing
+      # from `include` in Cargo.toml.
+      - run: cargo package
+
+  publish:
+    name: Publish to crates.io
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release' && github.event.action == 'published'
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/vegam
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Tags use the Python spelling (v1.2.0rc1); the crate uses semver
+      # (1.2.0-rc.1). See scripts/release.py.
+      - name: Check the tag matches the crate version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[0].version')
+          expected=$(echo "$version" | sed -E 's/-alpha\./a/; s/-beta\./b/; s/-rc\./rc/')
+          if [ "v$expected" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Cargo.toml version $version does not match tag $GITHUB_REF_NAME"
+            exit 1
+          fi
+
+      - uses: rust-lang/crates-io-auth-action@v1
+        id: auth
+
+      - run: cargo publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
