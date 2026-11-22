@@ -1,0 +1,44 @@
+[build-system]
+requires = ["scikit-build-core>=0.11", "nanobind>=2.9"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "pyvegam"
+version = "0.0.1"
+description = "Jerk-limited time-optimal path parameterization (TOPP)"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = []
+classifiers = [
+    "Programming Language :: C++",
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+]
+
+[project.urls]
+Homepage = "https://github.com/hashb/vegam"
+
+[dependency-groups]
+test = ["pytest>=8"]
+
+[tool.scikit-build]
+minimum-version = "build-system.requires"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/vegam"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.cibuildwheel]
+# Free-threaded (cp3xxt) builds need nanobind_add_module(... FREE_THREADED) and a
+# thread-safe core; enable once the TOPP implementation is ready for it.
+# 32-bit Windows and musllinux are not built.
+skip = ["*t-*", "*-win32", "*-musllinux_*"]
+test-groups = ["test"]
+test-sources = ["tests"]
+test-command = "pytest"
+
+[tool.cibuildwheel.macos.environment]
+MACOSX_DEPLOYMENT_TARGET = "11.0"
